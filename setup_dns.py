@@ -2,27 +2,17 @@
 import os
 import sys
 import json
-import yaml
 from subprocess import call
 
-if len(sys.argv) != 2:
-    print "Usage: python {0} <domain-name>\n"
+if len(sys.argv) != 4:
+    print "Usage: python setup_dns.py <domain-name> <dns-internal-ip> <cf-internal-ip>\n"
     sys.exit(0)
 domain_name = sys.argv[1]
-print "Will setup a DNS server for the domain {0}".format(domain_name)
-
-#CF_YAML = 'micro_cf.yml'
-#
-#if not os.path.isfile(os.path.join(HOME, CF_YAML)):
-#    print "{0} does not exist in {1}, exit.".format(CF_YAML, HOME)
-#    sys.exit(0)
-
-# Parse CF_YAML 
-#with open(os.path.join(HOME, CF_YAML), 'r') as stream:
-#    cf_conf = yaml.load(stream)
-#domain_name = cf_conf['properties']['domain']
+dns_internal_ip = sys.argv[2]
+cf_internal_ip = sys.argv[3]
 domain_name_prefix = domain_name.split('.')[0]
 zone_name = '.'.join(domain_name.split('.')[1:])
+print "Will setup a DNS server for the domain {0}".format(domain_name)
 
 HOME = os.environ['HOME']
 DNS_DIR = '/etc/bind/'
@@ -109,7 +99,6 @@ ns      IN      A       {0}
 *.{3}    IN      A       {1}
 """
 
-
 # Get the namerserver IPs to forward
 with open('/etc/resolv.conf', 'r') as tmpfile:
     lines = tmpfile.readlines()
@@ -141,8 +130,6 @@ dns_conf_opt = DNS_CONF_OPT.format(nameserver_ips)
 with open(os.path.join(DNS_DIR, DNS_CONF_OPT_FILE), 'w') as f:
     f.write(dns_conf_opt)
 
-dns_internal_ip = '10.0.0.100'
-cf_internal_ip = '10.0.16.4'
 lan_zone_conf = ZONE_CONF.format(dns_internal_ip, cf_internal_ip, zone_name, domain_name_prefix)
 with open(os.path.join(DNS_DIR, LAN_ZONE_FILE), 'w') as f:
     f.write(lan_zone_conf)
