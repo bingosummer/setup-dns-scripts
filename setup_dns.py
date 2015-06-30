@@ -4,12 +4,11 @@ import sys
 import json
 from subprocess import call
 
-if len(sys.argv) != 4:
-    print "Usage: python setup_dns.py <domain-name> <dns-internal-ip> <cf-internal-ip>\n"
+if len(sys.argv) != 3:
+    print "Usage: python setup_dns.py <domain-name> <cf-internal-ip>\n"
     sys.exit(0)
 domain_name = sys.argv[1]
-dns_internal_ip = sys.argv[2]
-cf_internal_ip = sys.argv[3]
+cf_internal_ip = sys.argv[2]
 domain_name_prefix = domain_name.split('.')[0]
 zone_name = '.'.join(domain_name.split('.')[1:])
 print "Will setup a DNS server for the domain {0}".format(domain_name)
@@ -130,6 +129,9 @@ dns_conf_opt = DNS_CONF_OPT.format(nameserver_ips)
 with open(os.path.join(DNS_DIR, DNS_CONF_OPT_FILE), 'w') as f:
     f.write(dns_conf_opt)
 
+call("ifconfig eth0 | sed -n '/inet addr/p' | awk -F'[: ]+' '{print $4}' > /tmp/dns-internal-ip", shell=True)
+with open('/tmp/dns-internal-ip', 'r') as f:
+    dns_internal_ip = f.read().strip()
 lan_zone_conf = ZONE_CONF.format(dns_internal_ip, cf_internal_ip, zone_name, domain_name_prefix)
 with open(os.path.join(DNS_DIR, LAN_ZONE_FILE), 'w') as f:
     f.write(lan_zone_conf)
