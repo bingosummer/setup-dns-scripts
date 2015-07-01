@@ -1,17 +1,11 @@
 #!/usr/bin/env python
+import json
+import optparse
 import os
 import sys
-import json
+from optparse import OptionParser
 from subprocess import call
 
-if len(sys.argv) != 3:
-    print "Usage: python setup_dns.py <domain-name> <cf-internal-ip>\n"
-    sys.exit(0)
-domain_name = sys.argv[1]
-cf_internal_ip = sys.argv[2]
-domain_name_prefix = domain_name.split('.')[0]
-zone_name = '.'.join(domain_name.split('.')[1:])
-print "Will setup a DNS server for the domain {0}".format(domain_name)
 
 HOME = os.environ['HOME']
 DNS_DIR = '/etc/bind/'
@@ -98,48 +92,125 @@ ns      IN      A       {0}
 *.{3}    IN      A       {1}
 """
 
-# Get the namerserver IPs to forward
-with open('/etc/resolv.conf', 'r') as tmpfile:
-    lines = tmpfile.readlines()
-nameserver_ips = [line.strip().split()[-1] for line in lines if line.startswith('nameserver')]
-if not nameserver_ips:
+def get_forwarding_nameservers(resolv_conf='/etc/resolv.conf'):
+    # Get the namerserver IPs to forward
     nameserver_ips = ['8.8.8.8', '8.8.4.4']
-nameserver_ips = ';'.join(nameserver_ips) + ';'
+    if not os.path.isfile(resolv_conf):
+        return nameserver_ips
+    with open(resolv_conf, 'r') as f:
+        lines = f.readlines()
+    nameserver_ips = [line.strip().split()[-1] for line in lines if line.startswith('nameserver')]
+    return nameserver_ips
 
-# Get the reserved IP for CloudFoundry and DNS server
-with open(os.path.join(HOME, 'settings'), "r") as tmpfile:
-    contents = tmpfile.read()
-settings = json.loads(contents)
-dns_reserved_ip = settings.get('dns-ip')
-cf_reserved_ip = settings.get('cf-ip')
-if dns_reserved_ip is None or cf_reserved_ip is None:
-    print ("Can't find the reserved IP for CloudFoundry "
-           "or DNS server in {0}, exit.").format(os.path.join(HOME, 'settings'))
-    sys.exit(0)
 
-# Install bind9
-call('apt-get -qq update', shell=True)
-call('apt-get install -yqq bind9 bind9utils', shell=True)
+def set_config(file, contents):
+    with open(file, 'w') as f:
+        f.write(contents)
 
-dns_conf = DNS_CONF.format(zone_name, DNS_DIR, LAN_ZONE_FILE, WAN_ZONE_FILE)
-with open(os.path.join(DNS_DIR, DNS_CONF_FILE), 'w') as f:
-    f.write(dns_conf)
 
-dns_conf_opt = DNS_CONF_OPT.format(nameserver_ips)
-with open(os.path.join(DNS_DIR, DNS_CONF_OPT_FILE), 'w') as f:
-    f.write(dns_conf_opt)
+def parse_dns_info(parser):
+    (options, args) = parser.parse_args()
 
-call("ifconfig eth0 | sed -n '/inet addr/p' | awk -F'[: ]+' '{print $4}' > /tmp/dns-internal-ip", shell=True)
-with open('/tmp/dns-internal-ip', 'r') as f:
-    dns_internal_ip = f.read().strip()
-lan_zone_conf = ZONE_CONF.format(dns_internal_ip, cf_internal_ip, zone_name, domain_name_prefix)
-with open(os.path.join(DNS_DIR, LAN_ZONE_FILE), 'w') as f:
-    f.write(lan_zone_conf)
-wan_zone_conf = ZONE_CONF.format(dns_reserved_ip, cf_reserved_ip, zone_name, domain_name_prefix)
-with open(os.path.join(DNS_DIR, WAN_ZONE_FILE), 'w') as f:
-    f.write(wan_zone_conf)
+    domain_name = options.domain_name
+    if not domain_name:
+        print "The domain name is not provided."
+        parser.print_help()
+        sys.exit()
 
-# Restart bind9
-call('/etc/init.d/bind9 restart', shell=True)
-sys.exit(0)
+    cf_internal_ip = options.cf_internal_ip
+    if not cf_internal_ip:
+        print "The internal IP of CloudFoundry is not provided."
+        parser.print_help()
+        sys.exit()
 
+    call("ifconfig eth0 | sed -n '/inet addr/p' | awk -F'[: ]+' '{print $4}' > /tmp/dns-internal-ip", shell=True)
+    with open('/tmp/dns-internal-ip', 'r') as f:
+        dns_internal_ip = f.read().strip()
+    if not dns_internal_ip:
+        print "Can not get the internal IP of DNS (IP of eth0). Exit!"
+        sys.exit()
+
+    settings_filename = options.settings_filename
+    if settings_filename is None:
+        # If "settings" file is not specified, adopt the default one in HOME directory
+        settings_filename = os.path.join(HOME, 'settings')
+    else:
+        settings_filename = os.path.join(os.getcwd(), settings_filename) 
+
+    dns_external_ip = None
+    cf_external_ip = None
+    if os.path.isfile(settings_filename):
+        dns_external_ip, cf_external_ip = parse_settings(settings_filename)
+
+    # If external IPs of CF and DNS are specified as arguments, adopt them.
+    if options.dns_external_ip:
+        dns_external_ip = options.dns_external_ip
+    if options.cf_external_ip:
+        cf_external_ip = options.cf_external_ip
+
+    if not (dns_external_ip and cf_external_ip):
+        print "Can't get the external IP for CloudFoundry or DNS."
+        print "Exit!"
+        sys.exit()
+
+    if options.verbose:
+        print domain_name, cf_external_ip, dns_external_ip, cf_internal_ip, dns_internal_ip
+
+    return domain_name, cf_external_ip, dns_external_ip, cf_internal_ip, dns_internal_ip
+
+
+def parse_settings(file):
+    # Get the reserved IP for CloudFoundry and DNS server
+    with open(file, "r") as f:
+        contents = f.read()
+    settings = json.loads(contents)
+    dns_reserved_ip = settings.get('dns-ip')
+    cf_reserved_ip = settings.get('cf-ip')
+    return [dns_reserved_ip, cf_reserved_ip]
+
+
+if __name__ == '__main__':
+    parser = OptionParser()
+    parser.add_option("-d", "--domain", dest="domain_name",
+                      help="The domain name")
+    parser.add_option("-i", "--cf-internal", dest="cf_internal_ip",
+                      help="The internal IP of CloudFoundry")
+    parser.add_option("-e", "--cf-external", dest="cf_external_ip",
+                      help="The external IP of CloudFoundry")
+    parser.add_option("-n", "--dns-external", dest="dns_external_ip",
+                      help="The external IP of DNS")
+    parser.add_option("-s", "--settings", dest="settings_filename",
+                      help="The file name of json settings")
+    parser.add_option("-v", "--verbose",
+                      action="store_true", dest="verbose",
+                      help="Print verbose information")
+
+    domain_name, cf_external_ip, dns_external_ip, cf_internal_ip, dns_internal_ip = parse_dns_info(parser)
+    domain_name_prefix = domain_name.split('.')[0]
+    zone_name = '.'.join(domain_name.split('.')[1:])
+    print "Will setup DNS for the domain {0}".format(domain_name)
+
+    # Install bind9
+    call('apt-get -qq update', shell=True)
+    call('apt-get install -yqq bind9 bind9utils', shell=True)
+
+    dns_conf = DNS_CONF.format(zone_name, DNS_DIR, LAN_ZONE_FILE, WAN_ZONE_FILE)
+    dns_conf_file = os.path.join(DNS_DIR, DNS_CONF_FILE)
+    set_config(dns_conf_file, dns_conf)
+
+    nameserver_ips = get_forwarding_nameservers()
+    nameserver_ips = ';'.join(nameserver_ips) + ';'
+    dns_conf_opt = DNS_CONF_OPT.format(nameserver_ips)
+    dns_conf_opt_file = os.path.join(DNS_DIR, DNS_CONF_OPT_FILE)
+    set_config(dns_conf_opt_file, dns_conf_opt)
+
+    lan_zone_conf = ZONE_CONF.format(dns_internal_ip, cf_internal_ip, zone_name, domain_name_prefix)
+    lan_zone_file = os.path.join(DNS_DIR, LAN_ZONE_FILE)
+    set_config(lan_zone_file, lan_zone_conf)
+
+    wan_zone_conf = ZONE_CONF.format(dns_external_ip, cf_external_ip, zone_name, domain_name_prefix)
+    wan_zone_file = os.path.join(DNS_DIR, WAN_ZONE_FILE)
+    set_config(wan_zone_file, wan_zone_conf)
+
+    # Restart bind9
+    call('/etc/init.d/bind9 restart', shell=True)

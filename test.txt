@@ -1,0 +1,15 @@
+sudo ./setup_dns.py
+sudo ./setup_dns.py -d azure.love.cf
+sudo ./setup_dns.py -i 10.0.16.4
+
+sudo ./setup_dns.py -d azure.love.cf -i 10.0.16.4
+sudo ./setup_dns.py -d azure.love.cf -i 10.0.16.4 -s settings
+sudo ./setup_dns.py -d azure.love.cf -i 10.0.16.4 -s ./settings
+sudo ./setup_dns.py -d azure.love.cf -i 10.0.16.4 -s /setup-dns-scripts/settings
+sudo ./setup_dns.py -d azure.love.cf -i 10.0.16.4 -n 23.100.112.130
+sudo ./setup_dns.py -d azure.love.cf -i 10.0.16.4 -e 23.100.113.201
+sudo ./setup_dns.py -d azure.love.cf -i 10.0.16.4 -e 23.100.113.201 -n 23.100.112.130
+sudo ./setup_dns.py -d azure.love.cf -i 10.0.16.4 -e 23.100.113.201 -n 23.100.112.130 -s /setup-dns-scripts/settings
+
+dig azure.love.cf @10.0.0.100
+dig azure.love.cf @23.100.112.130
