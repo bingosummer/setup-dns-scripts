@@ -10,7 +10,8 @@ from subprocess import call
 HOME = os.environ['HOME']
 DNS_DIR = '/etc/bind/'
 DNS_CONF_FILE = 'named.conf'
-DNS_CONF = """// This is the primary configuration file for the BIND DNS server named.
+DNS_CONF = """\
+// This is the primary configuration file for the BIND DNS server named.
 //
 // Please read /usr/share/doc/bind9/README.Debian.gz for information on the
 // structure of BIND configuration files in Debian, *BEFORE* you customize
@@ -42,7 +43,8 @@ view "external" {{
 }};
 """
 DNS_CONF_OPT_FILE = 'named.conf.options'
-DNS_CONF_OPT = """options {{
+DNS_CONF_OPT = """\
+options {
         directory "/var/cache/bind";
 
         // If there is a firewall between you and nameservers you want
@@ -54,9 +56,9 @@ DNS_CONF_OPT = """options {{
         // Uncomment the following block, and insert the addresses replacing
         // the all-0's placeholder.
 
-        // forwarders {{
+        // forwarders {
         //      0.0.0.0;
-        // }};
+        // };
 
         //========================================================================
         // If BIND logs error messages about the root key being expired,
@@ -65,15 +67,19 @@ DNS_CONF_OPT = """options {{
         dnssec-validation auto;
 
         auth-nxdomain no;    # conform to RFC1035
-        listen-on {{ any; }};
-        forwarders {{
-                {0}
-        }};
-}};
+        listen-on { any; };
+        forwarders {
+             10.0.0.2;
+             10.0.0.3;
+             8.8.8.8;
+             8.8.4.4;
+        };
+};
 """
 LAN_ZONE_FILE = 'cf.com.lan'
 WAN_ZONE_FILE = 'cf.com.wan'
-ZONE_CONF = """;
+ZONE_CONF = """\
+;
 ; BIND data file for local loopback interface
 ;
 $TTL    604800
@@ -91,16 +97,15 @@ ns      IN      A       {0}
 {3}      IN      A       {1}
 *.{3}    IN      A       {1}
 """
-
-def get_forwarding_nameservers(resolv_conf='/etc/resolv.conf'):
-    # Get the namerserver IPs to forward
-    nameserver_ips = ['8.8.8.8', '8.8.4.4']
-    if not os.path.isfile(resolv_conf):
-        return nameserver_ips
-    with open(resolv_conf, 'r') as f:
-        lines = f.readlines()
-    nameserver_ips = [line.strip().split()[-1] for line in lines if line.startswith('nameserver')]
-    return nameserver_ips
+ETH0_CFG = '/etc/network/interfaces.d/eth0.cfg'
+ETH0_STATIC = """\
+iface eth0 inet static
+   address {0}
+   netmask 255.255.255.0
+   network 10.0.0.0
+   gateway 10.0.0.1
+"""
+RESOLV_CONF_BASE = '/etc/resolvconf/resolv.conf.d/base'
 
 
 def set_config(file, contents):
@@ -161,13 +166,19 @@ def parse_dns_info(parser):
 
 def parse_settings(file):
     # Get the reserved IP for CloudFoundry and DNS server
-    with open(file, "r") as f:
+    with open(file, 'r') as f:
         contents = f.read()
     settings = json.loads(contents)
     dns_reserved_ip = settings.get('dns-ip')
     cf_reserved_ip = settings.get('cf-ip')
     return [dns_reserved_ip, cf_reserved_ip]
 
+
+def change_eth0_to_static(dev_box_ip):
+    with open(ETH0_CFG, 'r') as f:
+        contents = f.read()
+    contents = contents.replace('iface eth0 inet dhcp', ETH0_STATIC.format(dev_box_ip))
+    set_config(ETH0_CFG, contents)
 
 if __name__ == '__main__':
     parser = OptionParser()
@@ -198,11 +209,8 @@ if __name__ == '__main__':
     dns_conf_file = os.path.join(DNS_DIR, DNS_CONF_FILE)
     set_config(dns_conf_file, dns_conf)
 
-    nameserver_ips = get_forwarding_nameservers()
-    nameserver_ips = ';'.join(nameserver_ips) + ';'
-    dns_conf_opt = DNS_CONF_OPT.format(nameserver_ips)
     dns_conf_opt_file = os.path.join(DNS_DIR, DNS_CONF_OPT_FILE)
-    set_config(dns_conf_opt_file, dns_conf_opt)
+    set_config(dns_conf_opt_file, DNS_CONF_OPT)
 
     lan_zone_conf = ZONE_CONF.format(dns_internal_ip, cf_internal_ip, zone_name, domain_name_prefix)
     lan_zone_file = os.path.join(DNS_DIR, LAN_ZONE_FILE)
@@ -212,5 +220,8 @@ if __name__ == '__main__':
     wan_zone_file = os.path.join(DNS_DIR, WAN_ZONE_FILE)
     set_config(wan_zone_file, wan_zone_conf)
 
+    change_eth0_to_static(dns_internal_ip)
+    call('echo "nameserver {0}" > {1}'.format(dns_internal_ip, RESOLV_CONF_BASE), shell=True)
+    call('resolvconf -u', shell=True)
     # Restart bind9
     call('/etc/init.d/bind9 restart', shell=True)
