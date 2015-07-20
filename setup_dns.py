@@ -69,8 +69,6 @@ options {
         auth-nxdomain no;    # conform to RFC1035
         listen-on { any; };
         forwarders {
-             10.0.0.2;
-             10.0.0.3;
              8.8.8.8;
              8.8.4.4;
         };
@@ -222,6 +220,7 @@ if __name__ == '__main__':
 
     change_eth0_to_static(dns_internal_ip)
     call('echo "nameserver {0}" > {1}'.format(dns_internal_ip, RESOLV_CONF_BASE), shell=True)
+    call('rm -f /run/resolvconf/resolv.conf', shell=True)
     call('resolvconf -u', shell=True)
     # Restart bind9
     call('/etc/init.d/bind9 restart', shell=True)
