@@ -7,7 +7,6 @@ from optparse import OptionParser
 from subprocess import call
 
 
-HOME = os.environ['HOME']
 DNS_DIR = '/etc/bind/'
 DNS_CONF_FILE = 'named.conf'
 DNS_CONF = """\
@@ -133,16 +132,11 @@ def parse_dns_info(parser):
         print "Can not get the internal IP of DNS (IP of eth0). Exit!"
         sys.exit()
 
-    settings_filename = options.settings_filename
-    if settings_filename is None:
-        # If "settings" file is not specified, adopt the default one in HOME directory
-        settings_filename = os.path.join(HOME, 'settings')
-    else:
-        settings_filename = os.path.join(os.getcwd(), settings_filename) 
 
     dns_external_ip = None
     cf_external_ip = None
-    if os.path.isfile(settings_filename):
+    settings_filename = options.settings_filename
+    if settings_filename and os.path.isfile(settings_filename):
         dns_external_ip, cf_external_ip = parse_settings(settings_filename)
 
     # If external IPs of CF and DNS are specified as arguments, adopt them.
